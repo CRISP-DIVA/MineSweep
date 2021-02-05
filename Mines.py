@@ -8,10 +8,15 @@ import pygame
 from pygame.locals import *
 import numpy as np
 import os
+import pyautogui
+import time
+import win32gui
+import win32com.client
+import win32api
 
 os.environ['SDL_VIDEO_WINDOW_POS'] = "%d,%d" % (100,100)
-SIZE_X = 24
-SIZE_Y = 24
+SIZE_X = 12
+SIZE_Y = 12
 BLOCK_SIDE = 50
 diff = 0.5
 mine_limit = int((SIZE_X*SIZE_Y)*diff)
@@ -25,20 +30,24 @@ print(RESOLUTION_X,RESOLUTION_Y)
 TOPBAR_SIZE = BLOCK_SIDE
 
 POINTS_SIZE = 0.2 * RESOLUTION_X
-BACKGROUND_COLOR = (255,255,255)
-UI_COLOR = (220,185,255)
-POINTS_COLOR = (150,185,255)
+BACKGROUND_COLOR = (0,0,0)
+UI_COLOR = (0,0,0)
+NUMBER_COLOR = (255,255,255)
+POINTS_COLOR = (0,0,0)
 
 
 NORMAL_STATE = 0
-NORMAL_COLOR = (100,100,100)
+NORMAL_COLOR = (255,255,255)
 CLICKED_STATE = 1
-CLICKED_COLOR = (200,200,200)
+CLICKED_COLOR = (0,0,255)
 MINE_STATE = 2
-MINE_COLOR = (255,10,10)
+MINE_COLOR = (255,0,0)
 FLAGGED_STATE = 3
-FLAGGED_COLOR = (30,240,21)
-
+FLAGGED_COLOR = (255,255,0)
+MINE_PENALTY = 20
+DISCOVERED_PENALTY = 2
+PROGRESS_REWARD = 5
+WIN_REWARD = 100
 
 class Mine():
     def __init__(self,x,realX,y,realY,ismine):
@@ -61,7 +70,7 @@ class Mine():
         pygame.draw.rect(screen,curr_color,pygame.Rect(left,top,BLOCK_SIDE,BLOCK_SIDE))  
         
         if self.state == CLICKED_STATE and self.number != 0:
-            textsurface = myfont.render(str(self.number), False, (0, 0, 0))
+            textsurface = myfont.render(str(self.number), False, NUMBER_COLOR)
             
             screen.blit(textsurface,(BORDER_SIZE*2+self.realX,BORDER_SIZE*2+self.realY))
         
@@ -93,6 +102,7 @@ class MineBoard():
         pygame.init()
         pygame.font.init() # you have to call this at the start, 
         self.n_mines = 0
+        self.show_end = False
         self.myfont = pygame.font.Font("SimplySquare.ttf",BLOCK_SIDE-int(BLOCK_SIDE*0.2))
         self.screen = pygame.display.set_mode([RESOLUTION_X,RESOLUTION_Y])        
         self.running = False
@@ -100,6 +110,9 @@ class MineBoard():
         self.board = []
         self.lost = False
         self.win = False
+        self.was_mine = False
+        self.was_discovered = False
+        
         lastmine = 0
         for i in range(SIZE_Y):
             row = []
@@ -129,7 +142,7 @@ class MineBoard():
         
         left = mine.x-1
         right = mine.x+2
-        
+        reward = 0
         for y in range(top,bot):
             for x in range(left,right):
                 if y < SIZE_Y and x < SIZE_X and y>0 and x>0:
@@ -138,8 +151,16 @@ class MineBoard():
                         if self.board[y,x].number == 0:
                             self.clearMines(self.board[y,x])
                         self.points+=5
+                        reward += PROGRESS_REWARD
+                    elif not self.board[y,x].ismine:
+                        reward -= DISCOVERED_PENALTY
+                    else:
+                        if self.board[y,x].state == NORMAL_STATE and self.board[y,x].ismine:
+                            reward -= MINE_PENALTY
+                        else:
+                            reward -= MINE_PENALTY
                     
-                  
+        return reward
     def checkwin(self):
         win = True
         for i in range(SIZE_Y):
@@ -149,6 +170,8 @@ class MineBoard():
                         win = False
         return win
     
+   
+            
     def calcMines(self):
         for i in range(SIZE_Y):
             for j in range(SIZE_X):
@@ -172,31 +195,42 @@ class MineBoard():
                 
                            
     def drawBoard(self):
-        self.screen.fill(BACKGROUND_COLOR)
         
-        if not self.lost and not self.win:
+        
+        if not self.show_end:
+            self.screen.fill(BACKGROUND_COLOR)
             pygame.draw.rect(self.screen,UI_COLOR,pygame.Rect(BORDER_SIZE,BORDER_SIZE,RESOLUTION_X-BORDER_SIZE*2,TOPBAR_SIZE-BORDER_SIZE))
             
             pygame.draw.rect(self.screen,UI_COLOR,pygame.Rect(BORDER_SIZE,TOPBAR_SIZE+BORDER_SIZE,RESOLUTION_X-BORDER_SIZE*2,RESOLUTION_Y-(TOPBAR_SIZE+BORDER_SIZE*2)))
             
             pygame.draw.rect(self.screen,POINTS_COLOR,pygame.Rect(BORDER_SIZE*2,BORDER_SIZE*2,POINTS_SIZE,TOPBAR_SIZE-BORDER_SIZE*3))
             
-            textsurface = self.myfont.render(str(self.points).zfill(4), False, (0, 0, 0))
+            textsurface = self.myfont.render(str(self.points).zfill(4), False, NUMBER_COLOR)
             
             self.screen.blit(textsurface,(BORDER_SIZE*2*2,BORDER_SIZE*2*2))
             
             for i in range(SIZE_Y):
                 for j in range(SIZE_X): 
                     self.board[i,j].drawMine(self.screen,BORDER_SIZE*2+(BLOCK_SIDE+BORDER_SIZE)*j,TOPBAR_SIZE+BORDER_SIZE*2+(BLOCK_SIDE+BORDER_SIZE)*i,self.myfont)
+            pygame.display.flip()
         
-        elif self.lost:
-            textsurface = self.myfont.render("YOU LOOOOOOOST", False, (0, 0, 0))
+        if self.lost:
+            
+            pygame.time.wait(600)
+            self.screen.fill(BACKGROUND_COLOR)
+            textsurface = self.myfont.render("YOU LOOOOOOOST", False, (255,255, 255))
             
             self.screen.blit(textsurface,(RESOLUTION_X//2,RESOLUTION_Y//2))
-        else:
-            textsurface = self.myfont.render("YOU WIIIIIIIN", False, (0, 0, 0))
+            pygame.display.flip()
+            self.show_end = True
+        elif self.win:
+            pygame.time.wait(600)
+            self.screen.fill(BACKGROUND_COLOR)
+            textsurface = self.myfont.render("YOU WIIIIIIIN", False, (255, 255, 255))
             
             self.screen.blit(textsurface,(RESOLUTION_X//2,RESOLUTION_Y//2))
+            pygame.display.flip()
+            self.show_end = True
         
         pygame.display.flip()
 
@@ -204,6 +238,7 @@ class MineBoard():
         clicked = False
         r_clicked = False
         restart = False
+        reward = 0
         for event in pygame.event.get():
             if event.type==pygame.QUIT:
                 self.running=False
@@ -220,29 +255,110 @@ class MineBoard():
                 aux = self.board[i,j].update(clicked,r_clicked)
                 
                 if aux>0 and self.board[i,j].number == 0:
-                    self.clearMines(self.board[i,j])
+                    reward += self.clearMines(self.board[i,j])
+                elif self.board[i,j].number != 0 and aux>0:
+                    reward += PROGRESS_REWARD
                 elif aux == -1:
                     
                     self.lost= True
                 
                 self.points += aux
         self.win = self.checkwin()
-        return restart
+        return reward
     def startGame(self):
         self.running = True
 
-
-board = MineBoard()
-
-board.startGame()
-restart = False
-while board.running:
-    if restart:
-        board = MineBoard()
-        board.startGame()
-        
-    board.drawBoard()
-    restart = board.updateBoard()
+class env():
     
- 
-pygame.quit()
+    def restart(self):
+        self.__init__()
+    
+    def get_state(self):
+        b = self.board.board
+        board = []
+        primrow = [self.current_x,self.current_y]
+        for i in range(self.SIZE-2):
+            primrow.append(0)
+        board.append(primrow)
+        for i in range(self.SIZE):
+            row = []
+            for j in range(self.SIZE):
+                if b[i,j].state == CLICKED_STATE:
+                    row.append(b[i,j].number)
+                else:
+                    row.append(-2)
+            board.append(row)
+        return np.array(board)
+    
+    def screenshot(self,window_title=None):
+        if window_title:
+            hwnd = win32gui.FindWindow(None, window_title)
+            if hwnd:
+                shell = win32com.client.Dispatch("WScript.Shell")
+                shell.SendKeys('%')
+                win32gui.SetForegroundWindow(hwnd)
+                x, y, x1, y1 = win32gui.GetClientRect(hwnd)
+                x, y = win32gui.ClientToScreen(hwnd, (x, y))
+                x1, y1 = win32gui.ClientToScreen(hwnd, (x1 - x, y1 - y))
+                im = pyautogui.screenshot(region=(x, y, x1, y1))
+                return im,x,y,x1,y1
+            else:
+                print('Window not found!')
+        else:
+            im = pyautogui.screenshot()
+            return im,x,y,x1,y1
+        
+    def __init__(self):
+        self.actions = ['left','right','up','down','click']
+        self.board = MineBoard()
+        self.board.startGame()
+        
+        self.current_im,x_w,y_w,x1_w,y1_w = self.screenshot('pygame window')
+        self.origin_x = x_w+BLOCK_SIDE//2
+        self.origin_y = y_w+int(BLOCK_SIDE*1.5)
+        self.current_x = 0
+        self.current_y = 0
+        self.SIZE = SIZE_X
+        
+        
+    def update_cursor_pos(self):
+        flags, hcursor, (self.cursor_x,self.cursor_y) = win32gui.GetCursorInfo()
+    def render(self):
+        self.board.drawBoard()
+    def step(self,action):
+        reward = 0
+        
+        self.update_cursor_pos()
+        if action == 'left':
+            self.current_x -= 1
+            if self.current_x < 0:
+                self.current_x = 0
+        elif action == 'right':
+            self.current_x += 1
+            if self.current_x >= self.SIZE:
+                self.current_x = self.SIZE-1
+        elif action == 'up':
+            self.current_y -= 1
+            if self.current_y < 0:
+                self.current_y = 0
+        elif action == 'down':
+            self.current_y += 1
+            if self.current_y >= self.SIZE:
+                self.current_y = self.SIZE-1
+        else:
+            if self.board.board[self.current_y,self.current_x].state == CLICKED_STATE:
+                reward -= DISCOVERED_PENALTY 
+            pyautogui.click(self.origin_x+self.current_x*BLOCK_SIDE,self.origin_y+self.current_y*BLOCK_SIDE)
+        win32api.SetCursorPos((self.origin_x+self.current_x*BLOCK_SIDE,self.origin_y+self.current_y*BLOCK_SIDE))
+        
+        rewardd = self.board.updateBoard() 
+        reward += rewardd
+        if self.board.lost:
+            reward -= MINE_PENALTY
+        elif self.board.win:
+            reward += WIN_REWARD
+            
+        return reward,self.board.lost,self.board.win
+        
+        
+        
